@@ -43,4 +43,16 @@ public class ComparisonResult
 
     /// <summary>File extension (e.g., ".cs", ".csproj").</summary>
     public string Extension => Path.GetExtension(RelativePath).ToLowerInvariant();
+
+    /// <summary>Heuristic classification of what kind of change this represents.</summary>
+    public ChangeCategory Category { get; set; } = ChangeCategory.Unknown;
+
+    /// <summary>Risk level for applying this change.</summary>
+    public RiskLevel Risk { get; set; } = RiskLevel.ReviewRequired;
+
+    /// <summary>Linux-incompatibility issues detected in this file.</summary>
+    public List<LinuxIssue> LinuxIssues { get; set; } = [];
+
+    /// <summary>Human-readable explanations of why this file has its current risk level.</summary>
+    public List<string> RiskReasons { get; set; } = [];
 }

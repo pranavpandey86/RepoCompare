@@ -3,29 +3,32 @@ using RepoCompare.Services;
 namespace RepoCompare;
 
 /// <summary>
-/// RepoCompare — Git Branch Synchronization Analysis Tool
+/// RepoCompare — Non-Destructive Migration Analysis Tool
 ///
 /// Compares two directory trees (checked-out branches) and identifies truly
 /// changed files by normalizing away encoding, BOM, and whitespace noise.
+/// Classifies changes by category (Container/Business/Config/etc.) and risk level.
+/// Detects Linux-incompatibility issues and case collisions.
 ///
 /// Usage:
 ///   dotnet run -- --source /path/to/source --target /path/to/target [options]
 ///
 /// Options:
-///   --source, -s       Path to the source directory (e.g., old repo checkout)
-///   --target, -t       Path to the target directory (e.g., main checkout)
-///   --source-label     Label for source (default: "Source")
-///   --target-label     Label for target (default: "Target")
-///   --output, -o       Output path for the Markdown report (default: ./comparison_report.md)
-///   --generate-script  Generate sync_changes.sh and git_workflow.sh (default: true)
-///   --verbose, -v      Show detailed progress during comparison
-///   --help, -h         Show this help message
+///   --source, -s        Path to the source directory (e.g., container-broken checkout)
+///   --target, -t        Path to the target directory (e.g., old-main checkout)
+///   --source-label      Label for source (default: "Source")
+///   --target-label      Label for target (default: "Target")
+///   --output-dir, -o    Directory for all output files (default: ./output)
+///   --apply-list        Path to a curated file list; generates an apply script for only those files
+///   --no-json           Don't generate report.json
+///   --no-csv            Don't generate CSV files
+///   --verbose, -v       Show detailed progress during comparison
+///   --help, -h          Show this help message
 /// </summary>
 public class Program
 {
     public static int Main(string[] args)
     {
-        // ── Parse Arguments ──
         var options = ParseArguments(args);
 
         if (options.ShowHelp || string.IsNullOrEmpty(options.SourcePath) || string.IsNullOrEmpty(options.TargetPath))
@@ -79,8 +82,9 @@ public class Program
     {
         // ── Setup components ──
         var scanner = new DirectoryScanner();
-        var comparer = new FileComparer(scanner, verbose: true); // Always show progress
+        var comparer = new FileComparer(scanner, verbose: true);
         var reporter = new ReportGenerator();
+        var outputGen = new OutputGenerator();
 
         // ── Run comparison ──
         var summary = comparer.Compare(
@@ -92,39 +96,48 @@ public class Program
         // ── Print console summary ──
         reporter.PrintConsoleSummary(summary);
 
+        // ── Create output directory ──
+        var outputDir = Path.GetFullPath(options.OutputDir);
+        Directory.CreateDirectory(outputDir);
+
         // ── Write Markdown report ──
-        var reportPath = options.OutputPath;
+        var reportPath = Path.Combine(outputDir, "comparison_report.md");
         var reportContent = reporter.GenerateMarkdownReport(summary);
         File.WriteAllText(reportPath, reportContent);
 
         Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"  📄 Report saved to: {reportPath}");
+        Console.WriteLine($"  📄 Markdown report: {reportPath}");
         Console.ResetColor();
 
-        // ── Generate scripts ──
-        if (options.GenerateScript)
+        // ── Write structured outputs ──
+        bool hasApplyList = !string.IsNullOrEmpty(options.ApplyListPath);
+
+        if (options.EmitJson || options.EmitCsv)
         {
-            var outputDir = Path.GetDirectoryName(Path.GetFullPath(reportPath)) ?? ".";
-
-            // Sync script
-            var syncPath = Path.Combine(outputDir, "sync_changes.sh");
-            var syncContent = reporter.GenerateSyncScript(summary);
-            File.WriteAllText(syncPath, syncContent);
-
-            // Git workflow script
-            var gitPath = Path.Combine(outputDir, "git_workflow.sh");
-            var gitContent = reporter.GenerateGitWorkflowScript(summary);
-            File.WriteAllText(gitPath, gitContent);
+            outputGen.WriteAll(
+                summary,
+                outputDir,
+                includeApplyList: hasApplyList,
+                applyListPath: options.ApplyListPath);
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"  📜 Sync script saved to: {syncPath}");
-            Console.WriteLine($"  🔧 Git workflow saved to: {gitPath}");
+            if (options.EmitJson)
+                Console.WriteLine($"  📊 JSON report:    {Path.Combine(outputDir, "report.json")}");
+            if (options.EmitCsv)
+            {
+                Console.WriteLine($"  ⚠️  High-risk CSV:  {Path.Combine(outputDir, "high-risk-files.csv")}");
+                Console.WriteLine($"  🐧 Linux issues:   {Path.Combine(outputDir, "linux-issues.csv")}");
+                Console.WriteLine($"  🐳 Container list: {Path.Combine(outputDir, "container-only-files.txt")}");
+            }
+            Console.WriteLine($"  📜 Dry-run script: {Path.Combine(outputDir, "dry-run.sh")}");
+            if (hasApplyList)
+                Console.WriteLine($"  ✅ Apply script:   {Path.Combine(outputDir, "apply-changes.sh")}");
             Console.ResetColor();
         }
 
         Console.WriteLine();
 
-        // ── Return code: 0 if no changes needed, 1 if changes found ──
+        // ── Return code: 0 if identical, 2 if changes found ──
         return summary.ModifiedCount + summary.OnlyInSourceCount > 0 ? 2 : 0;
     }
 
@@ -150,14 +163,17 @@ public class Program
                 case "--target-label":
                     if (i + 1 < args.Length) options.TargetLabel = args[++i];
                     break;
-                case "--output" or "-o":
-                    if (i + 1 < args.Length) options.OutputPath = args[++i];
+                case "--output-dir" or "-o":
+                    if (i + 1 < args.Length) options.OutputDir = args[++i];
                     break;
-                case "--generate-script":
-                    options.GenerateScript = true;
+                case "--apply-list":
+                    if (i + 1 < args.Length) options.ApplyListPath = args[++i];
                     break;
-                case "--no-script":
-                    options.GenerateScript = false;
+                case "--no-json":
+                    options.EmitJson = false;
+                    break;
+                case "--no-csv":
+                    options.EmitCsv = false;
                     break;
                 case "--verbose" or "-v":
                     options.Verbose = true;
@@ -183,12 +199,13 @@ public class Program
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine();
         Console.WriteLine("  ╔═══════════════════════════════════════════════════════════════╗");
-        Console.WriteLine("  ║          RepoCompare — Branch Synchronization Tool           ║");
+        Console.WriteLine("  ║      RepoCompare — Non-Destructive Migration Analysis        ║");
         Console.WriteLine("  ╚═══════════════════════════════════════════════════════════════╝");
         Console.ResetColor();
         Console.WriteLine();
         Console.WriteLine("  Compare two directory trees (checked-out branches) and identify");
-        Console.WriteLine("  truly changed files, filtering out encoding/whitespace noise.");
+        Console.WriteLine("  truly changed files, classify them by category and risk level,");
+        Console.WriteLine("  and detect Linux container migration issues.");
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.White;
         Console.WriteLine("  USAGE:");
@@ -199,40 +216,55 @@ public class Program
         Console.ForegroundColor = ConsoleColor.White;
         Console.WriteLine("  REQUIRED:");
         Console.ResetColor();
-        Console.WriteLine("    --source, -s <path>   Source directory (e.g., source branch checkout)");
-        Console.WriteLine("    --target, -t <path>   Target directory (e.g., main checkout)");
+        Console.WriteLine("    --source, -s <path>    Source directory (e.g., container-broken checkout)");
+        Console.WriteLine("    --target, -t <path>    Target directory (e.g., old-main checkout)");
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.White;
         Console.WriteLine("  OPTIONS:");
         Console.ResetColor();
         Console.WriteLine("    --source-label <text>  Label for source (default: \"Source\")");
         Console.WriteLine("    --target-label <text>  Label for target (default: \"Target\")");
-        Console.WriteLine("    --output, -o <path>    Report output path (default: ./comparison_report.md)");
-        Console.WriteLine("    --generate-script      Generate sync + git scripts (default)");
-        Console.WriteLine("    --no-script            Don't generate scripts");
+        Console.WriteLine("    --output-dir, -o <dir> Output directory (default: ./output)");
+        Console.WriteLine("    --apply-list <file>    Curated file list → generate apply script");
+        Console.WriteLine("    --no-json              Don't generate report.json");
+        Console.WriteLine("    --no-csv               Don't generate CSV files");
         Console.WriteLine("    --verbose, -v          Show detailed progress");
         Console.WriteLine("    --help, -h             Show this help");
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.White;
-        Console.WriteLine("  EXAMPLE:");
+        Console.WriteLine("  WORKFLOW:");
         Console.ResetColor();
-        Console.WriteLine("    dotnet run -- \\");
-        Console.WriteLine("      --source /repos/old-repo \\");
-        Console.WriteLine("      --target /repos/new-repo \\");
-        Console.WriteLine("      --source-label \"OldRepo / feature-branch\" \\");
-        Console.WriteLine("      --target-label \"NewRepo / main\" \\");
-        Console.WriteLine("      --output ./comparison_report.md \\");
-        Console.WriteLine("      --generate-script");
+        Console.WriteLine("    1. Run comparison → review report.json + CSV files");
+        Console.WriteLine("    2. Edit container-only-files.txt to curate the apply list");
+        Console.WriteLine("    3. Re-run with --apply-list container-only-files.txt");
+        Console.WriteLine("    4. Execute apply-changes.sh to copy only curated files");
+        Console.WriteLine("    5. dotnet build to verify integrity");
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.WriteLine("  OUTPUTS:");
+        Console.ResetColor();
+        Console.WriteLine("    comparison_report.md   Detailed Markdown report with diffs");
+        Console.WriteLine("    report.json            Machine-readable JSON report");
+        Console.WriteLine("    high-risk-files.csv    Files needing manual review");
+        Console.WriteLine("    linux-issues.csv       Linux-incompatibility issues");
+        Console.WriteLine("    container-only-files.txt  Container-specific safe-to-copy files");
+        Console.WriteLine("    dry-run.sh             Non-destructive preview script");
+        Console.WriteLine("    apply-changes.sh       Apply script (only with --apply-list)");
         Console.WriteLine();
         Console.ForegroundColor = ConsoleColor.White;
         Console.WriteLine("  WHAT IT DOES:");
         Console.ResetColor();
         Console.WriteLine("    1. Scans both directories recursively (skips .git, bin, obj)");
-        Console.WriteLine("    2. Normalizes content: strips BOM, CRLF→LF, trims whitespace");
-        Console.WriteLine("    3. Compares using SHA-256 of normalized content");
-        Console.WriteLine("    4. Categorizes: IDENTICAL | MODIFIED | ONLY_IN_SOURCE | ONLY_IN_TARGET");
-        Console.WriteLine("    5. Generates unified diffs for modified files");
-        Console.WriteLine("    6. Outputs: console summary, Markdown report, sync script, git script");
+        Console.WriteLine("    2. Case-SENSITIVE path matching (critical for Linux containers)");
+        Console.WriteLine("    3. Detects case-only path collisions");
+        Console.WriteLine("    4. Normalizes content: strips BOM, CRLF→LF, trims whitespace");
+        Console.WriteLine("    5. Compares using SHA-256 of normalized content");
+        Console.WriteLine("    6. Classifies: ContainerSpecific | LinuxMigration | BusinessLogic");
+        Console.WriteLine("       | Config | Test | BuildInfra | Unknown");
+        Console.WriteLine("    7. Assesses risk: SafeToCopy | ReviewRequired | HighRisk");
+        Console.WriteLine("    8. Scans for Linux issues: Windows paths, Registry, CRLF in .sh");
+        Console.WriteLine("    9. Generates unified diffs for modified files");
+        Console.WriteLine("   10. Outputs: console summary, Markdown, JSON, CSV, scripts");
         Console.WriteLine();
     }
 
@@ -242,8 +274,10 @@ public class Program
         public string? TargetPath { get; set; }
         public string SourceLabel { get; set; } = "Source";
         public string TargetLabel { get; set; } = "Target";
-        public string OutputPath { get; set; } = "./comparison_report.md";
-        public bool GenerateScript { get; set; } = true;
+        public string OutputDir { get; set; } = "./output";
+        public string? ApplyListPath { get; set; }
+        public bool EmitJson { get; set; } = true;
+        public bool EmitCsv { get; set; } = true;
         public bool Verbose { get; set; } = false;
         public bool ShowHelp { get; set; } = false;
     }

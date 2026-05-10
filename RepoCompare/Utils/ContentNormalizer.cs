@@ -72,7 +72,7 @@ public static class ContentNormalizer
     {
         var bytes = Encoding.UTF8.GetBytes(normalizedContent);
         var hash = SHA256.HashData(bytes);
-        return Convert.ToHexStringLower(hash);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     /// <summary>
