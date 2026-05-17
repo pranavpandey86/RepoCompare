@@ -1,0 +1,32 @@
+# Known files to compare between source and target directories
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+# Paths should be relative to the root of the source/target directories
+
+Nuget.config
+src/Citi.Cto.Cmp.API/Controllers/AdminController.cs
+src/Citi.Cto.Cmp.API/Controllers/BaseController.cs
+src/Citi.Cto.Cmp.API/Controllers/ProductsController.cs
+src/Citi.Cto.Cmp.API/DI/ServiceCollectionExtensions.cs
+src/Citi.Cto.Cmp.API/Extensions/HttpContextAccessorExtension.cs
+src/Citi.Cto.Cmp.API/HttpClientHandlers/ServiceNowHttpClientHandler.cs
+src/Citi.Cto.Cmp.API/Policies/CustomPolicyRegistry.cs
+src/Citi.Cto.Cmp.API/Requests/AssociateIncidentRequest.cs
+src/Citi.Cto.Cmp.API/appsettings.Cob.json
+src/Citi.Cto.Cmp.API/appsettings.Development.json
+src/Citi.Cto.Cmp.API/appsettings.LocalDevelopment.json
+src/Citi.Cto.Cmp.API/appsettings.LocalNight.json
+src/Citi.Cto.Cmp.API/appsettings.Production.json
+src/Citi.Cto.Cmp.API/appsettings.Staging.json
+src/Citi.Cto.Cmp.API/appsettings.integration.json
+src/Citi.Cto.Cmp.API/appsettings.json
+src/Citi.Cto.Cmp.BLL/Constants/EnvironmentalCs.cs
+src/Citi.Cto.Cmp.BLL/Order/OrderCart.cs
+src/Citi.Cto.Cmp.BLL/ServiceClients/IServiceNowClient.cs
+src/Citi.Cto.Cmp.BLL/ServiceClients/ServiceNowClient.cs
+src/Citi.Cto.Cmp.BLL/Services/JwtService.cs
+src/Citi.Cto.Cmp.BLL/Services/ServiceNowService.cs
+src/Citi.Cto.Cmp.DAL/Repositories/AdminSettingRepository.cs
+src/Citi.Cto.Cmp.DTO/ServiceNow/GetServiceNowIncidentsDto.cs
+src/Citi.Cto.Cmp.DTO/ServiceNow/ServiceNowResponse.cs
+test/Citi.Cto.Cmp.API.Tests/Controllers/ProductsController/ProductsControllerTests.cs

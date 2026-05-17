@@ -19,6 +19,8 @@ namespace RepoCompare;
 ///   --source-label      Label for source (default: "Source")
 ///   --target-label      Label for target (default: "Target")
 ///   --output-dir, -o    Directory for all output files (default: ./output)
+///   --known-files, -k   Path to a file listing specific files to compare (one per line).
+///                       If empty or not provided, all files are compared.
 ///   --apply-list        Path to a curated file list; generates an apply script for only those files
 ///   --no-json           Don't generate report.json
 ///   --no-csv            Don't generate CSV files
@@ -86,12 +88,45 @@ public class Program
         var reporter = new ReportGenerator();
         var outputGen = new OutputGenerator();
 
+        // ── Load known-files filter (if provided) ──
+        HashSet<string>? knownFiles = null;
+        if (!string.IsNullOrEmpty(options.KnownFilesPath))
+        {
+            if (!File.Exists(options.KnownFilesPath))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"\n  ❌ Known-files list not found: {options.KnownFilesPath}");
+                Console.ResetColor();
+                return 1;
+            }
+
+            var lines = File.ReadAllLines(options.KnownFilesPath)
+                .Where(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#'))
+                .Select(l => l.Trim().Replace('\\', '/'))
+                .ToList();
+
+            if (lines.Count > 0)
+            {
+                knownFiles = new HashSet<string>(lines, StringComparer.Ordinal);
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine($"\n  📋 Known-files filter active: {knownFiles.Count} files loaded from {options.KnownFilesPath}");
+                Console.ResetColor();
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"\n  ⚠️  Known-files list is empty — comparing all files");
+                Console.ResetColor();
+            }
+        }
+
         // ── Run comparison ──
         var summary = comparer.Compare(
             options.SourcePath!,
             options.TargetPath!,
             options.SourceLabel,
-            options.TargetLabel);
+            options.TargetLabel,
+            knownFiles);
 
         // ── Print console summary ──
         reporter.PrintConsoleSummary(summary);
@@ -166,6 +201,9 @@ public class Program
                 case "--output-dir" or "-o":
                     if (i + 1 < args.Length) options.OutputDir = args[++i];
                     break;
+                case "--known-files" or "-k":
+                    if (i + 1 < args.Length) options.KnownFilesPath = args[++i];
+                    break;
                 case "--apply-list":
                     if (i + 1 < args.Length) options.ApplyListPath = args[++i];
                     break;
@@ -225,6 +263,8 @@ public class Program
         Console.WriteLine("    --source-label <text>  Label for source (default: \"Source\")");
         Console.WriteLine("    --target-label <text>  Label for target (default: \"Target\")");
         Console.WriteLine("    --output-dir, -o <dir> Output directory (default: ./output)");
+        Console.WriteLine("    --known-files, -k <file> File listing specific files to compare (one per line).");
+        Console.WriteLine("                             If empty or not specified, all files are compared.");
         Console.WriteLine("    --apply-list <file>    Curated file list → generate apply script");
         Console.WriteLine("    --no-json              Don't generate report.json");
         Console.WriteLine("    --no-csv               Don't generate CSV files");
@@ -275,6 +315,7 @@ public class Program
         public string SourceLabel { get; set; } = "Source";
         public string TargetLabel { get; set; } = "Target";
         public string OutputDir { get; set; } = "./output";
+        public string? KnownFilesPath { get; set; }
         public string? ApplyListPath { get; set; }
         public bool EmitJson { get; set; } = true;
         public bool EmitCsv { get; set; } = true;

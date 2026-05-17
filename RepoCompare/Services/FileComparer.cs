@@ -29,9 +29,12 @@ public class FileComparer
     }
 
     /// <summary>
-    /// Compares all files between source and target directories.
+    /// Compares files between source and target directories.
+    /// If knownFiles is provided and non-empty, only those specific files are compared.
+    /// If knownFiles is null or empty, all files are compared (full directory scan).
     /// </summary>
-    public ComparisonSummary Compare(string sourcePath, string targetPath, string sourceLabel, string targetLabel)
+    public ComparisonSummary Compare(string sourcePath, string targetPath, string sourceLabel, string targetLabel,
+        HashSet<string>? knownFiles = null)
     {
         var summary = new ComparisonSummary
         {
@@ -77,27 +80,52 @@ public class FileComparer
             collisionPaths.Add(c.Path2);
         }
 
-        // ── Step 3: Determine the union of all file paths (CASE-SENSITIVE) ──
-        var allFiles = new SortedSet<string>(sourceFiles, StringComparer.Ordinal);
-        allFiles.UnionWith(targetFiles);
+        // ── Step 3: Determine which files to compare ──
+        IEnumerable<string> filesToCompare;
+
+        if (knownFiles != null && knownFiles.Count > 0)
+        {
+            // Known-files mode: only compare files explicitly listed
+            filesToCompare = knownFiles.OrderBy(f => f, StringComparer.Ordinal);
+            WriteProgress($"\n📋 Known-files filter active: comparing {knownFiles.Count} specific files...\n");
+
+            // Warn about known files that don't exist in either directory
+            foreach (var kf in knownFiles)
+            {
+                if (!sourceFiles.Contains(kf) && !targetFiles.Contains(kf))
+                {
+                    WriteProgress($"  ⚠️  Known file not found in either directory: {kf}");
+                }
+            }
+        }
+        else
+        {
+            // Full comparison mode: union of all file paths (CASE-SENSITIVE)
+            var allFiles = new SortedSet<string>(sourceFiles, StringComparer.Ordinal);
+            allFiles.UnionWith(targetFiles);
+            filesToCompare = allFiles;
+            WriteProgress($"\nComparing {allFiles.Count} unique files...\n");
+        }
 
         // Also build case-insensitive lookups for cross-side matching
         var sourceLowerMap = BuildLowerCaseMap(sourceFiles);
         var targetLowerMap = BuildLowerCaseMap(targetFiles);
 
-        WriteProgress($"\nComparing {allFiles.Count} unique files...\n");
-
         int processed = 0;
-        int total = allFiles.Count;
+        int total = filesToCompare.Count();
 
         // ── Step 4: Compare each file ──
-        foreach (var relativePath in allFiles)
+        foreach (var relativePath in filesToCompare)
         {
             processed++;
 
             // Case-sensitive membership check
             bool inSource = sourceFiles.Contains(relativePath);
             bool inTarget = targetFiles.Contains(relativePath);
+
+            // Skip files from known list that don't exist in either directory
+            if (!inSource && !inTarget)
+                continue;
 
             // If not in target with exact case, check if there's a case-insensitive match
             // (this means a case-rename happened — flag it but still compare)
@@ -119,6 +147,17 @@ public class FileComparer
 
                 // Read content for classification
                 sourceContent = TryReadNormalized(Path.Combine(sourcePath, relativePath));
+
+                // In known-files mode, generate a full-content diff (all lines as additions)
+                // so the report shows the complete file content for files missing from target
+                if (knownFiles != null && sourceContent != null)
+                {
+                    var sourceLines = ContentNormalizer.SplitLines(sourceContent);
+                    var emptyLines = Array.Empty<string>();
+                    var diffLines = DiffEngine.ComputeDiff(emptyLines, sourceLines);
+                    result.UnifiedDiff = DiffEngine.FormatUnifiedDiff(
+                        diffLines, relativePath, targetLabel + " (missing)", sourceLabel);
+                }
             }
             else if (!inSource && inTarget)
             {
